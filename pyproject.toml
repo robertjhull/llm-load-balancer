@@ -1,0 +1,25 @@
+[project]
+name = "switchboard"
+version = "0.1.0"
+description = "Standalone LLM pool-orchestration service: capacity-aware routing, schema validation with retry, health checks, and throughput benchmarking across model deployments."
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.50",
+    "pydantic>=2",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "jsonschema>=4.20",
+]
+
+[project.scripts]
+switchboard = "switchboard.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["switchboard"]
+
+[tool.setuptools.package-dir]
+switchboard = "."
