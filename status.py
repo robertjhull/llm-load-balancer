@@ -121,7 +121,7 @@ def _pool_table(states: list["DeploymentState"]) -> str:
 
 def render(router: "Router") -> str:
     pools_html = "".join(
-        f'<div class="pool"><h3>{html.escape(pool)}</h3>{_pool_table(states)}</div>'
+        f'<div class="pool"><h4>{html.escape(pool)}</h4>{_pool_table(states)}</div>'
         for pool, states in router.pools.items()
     )
 
