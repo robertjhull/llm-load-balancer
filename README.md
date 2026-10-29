@@ -4,6 +4,8 @@ A capacity-aware HTTP router that sits in front of several LLM deployments
 (local or hosted) and schedules jobs across them, with schema-validated
 output, retries, tool-call loops, and health checks.
 
+<img width="1678" height="880" alt="Screenshot 2026-10-29 at 11 32 24 AM" src="https://github.com/user-attachments/assets/30eea50c-6b6d-49c6-bdb9-97676e263bd6" />
+
 ## Install
 
 ```
