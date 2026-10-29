@@ -4,9 +4,12 @@ import asyncio
 import heapq
 import json
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel
 
@@ -16,8 +19,8 @@ DEFAULT_REQUEST_TIMEOUT = 120.0
 
 
 class Deployment(BaseModel):
-    name: str
-    model: str
+    id: str | None = None
+    model: str | None = None
     api_base: str | None = None
     api_key: str | None = None
     capacity: int = 1
@@ -47,7 +50,7 @@ class DeploymentState:
         self.lanes: list[float] = [0.0] * max(1, deployment.capacity)
         heapq.heapify(self.lanes)
         self.semaphore = asyncio.Semaphore(max(1, deployment.capacity))
-        self.healthy = True
+        self.healthy = False
         self.prefill_tokens_per_second: float | None = None
         self.decode_tokens_per_second: float | None = None
         self.avg_completion_tokens: float | None = None
@@ -71,16 +74,37 @@ class DeploymentState:
             )
         return DEFAULT_DURATION_SECONDS
 
+    async def is_healthy(self) -> bool:
+        if not self.deployment.api_base:
+            return True
+
+        parts = urlsplit(self.deployment.api_base)
+        url = f"{parts.scheme}://{parts.netloc}/health"
+
+        def _ping() -> bool:
+            try:
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    return 200 <= resp.status < 300
+            except (urllib.error.URLError, OSError, ValueError):
+                return False
+
+        self.healthy = await asyncio.to_thread(_ping)
+        return self.healthy
+
 
 def load_pools(path: str | Path) -> PoolsConfig:
     raw = json.loads(Path(path).read_text())
 
     pools: dict[str, list[Deployment]] = {}
+    id: int = 0
     for pool_name, deployments in raw.items():
         models = [Deployment(**d) for d in deployments]
         names = [m.api_base + m.model for m in models]
         if len(names) != len(set(names)):
             raise ValueError(f"Duplicate model url in pool {pool_name!r}")
+        for model in models:
+            id += 1
+            model.id = f"m{id}"
         pools[pool_name] = models
 
     return PoolsConfig(pools)

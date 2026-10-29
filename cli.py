@@ -4,8 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import client
-
 DEFAULT_POOLS_CONFIG = "pools.json"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8800
@@ -55,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
             _serve(args)
         elif args.command == "list":
             _list(args)
-    except client.ClientError as exc:
+    except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0

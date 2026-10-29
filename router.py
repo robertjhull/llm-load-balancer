@@ -142,7 +142,7 @@ class Router:
 
     def _get_state(self, pool: str, deployment_id: str) -> DeploymentState:
         for state in self.pools[pool]:
-            if state.deployment.name == deployment_id:
+            if state.deployment.id == deployment_id:
                 return state
         raise KeyError(f"no deployment {deployment_id!r} in pool {pool!r}")
 
@@ -214,7 +214,7 @@ class Router:
                     return CompleteResult(
                         success=False,
                         content=None,
-                        model_id=state.deployment.name,
+                        model_id=state.deployment.id,
                         attempts=0,
                         blocked_reason=(
                             f"estimated prompt tokens ({prompt_tokens}) exceeds "
@@ -243,7 +243,7 @@ class Router:
                         )
                     except Exception as exc:  # noqa: BLE001 -- surfaced via blocked_reason
                         last_error = exc
-                        self._log_attempt(job.trace_id, state.deployment.name, attempt, None, exc)
+                        self._log_attempt(job.trace_id, state.deployment.id, attempt, None, exc)
                         continue
 
                     self._update_metrics(state, prompt_tokens, activity)
@@ -260,7 +260,7 @@ class Router:
                         return CompleteResult(
                             success=True,
                             content=message.content,
-                            model_id=state.deployment.name,
+                            model_id=state.deployment.id,
                             attempts=attempt,
                             blocked_reason=None,
                             latency_seconds=time.monotonic() - start,
@@ -273,7 +273,7 @@ class Router:
                         return CompleteResult(
                             success=True,
                             content=text,
-                            model_id=state.deployment.name,
+                            model_id=state.deployment.id,
                             attempts=attempt,
                             blocked_reason=None,
                             latency_seconds=time.monotonic() - start,
@@ -283,13 +283,13 @@ class Router:
                         validate(text, response_format["schema"])
                     except SchemaValidationError as exc:
                         last_error = exc
-                        self._log_attempt(job.trace_id, state.deployment.name, attempt, text, exc)
+                        self._log_attempt(job.trace_id, state.deployment.id, attempt, text, exc)
                         continue
 
                     return CompleteResult(
                         success=True,
                         content=text,
-                        model_id=state.deployment.name,
+                        model_id=state.deployment.id,
                         attempts=attempt,
                         blocked_reason=None,
                         latency_seconds=time.monotonic() - start,
@@ -298,7 +298,7 @@ class Router:
                 return CompleteResult(
                     success=False,
                     content=None,
-                    model_id=state.deployment.name,
+                    model_id=state.deployment.id,
                     attempts=retries,
                     blocked_reason=f"all attempts failed: {last_error}",
                     latency_seconds=time.monotonic() - start,
@@ -306,7 +306,7 @@ class Router:
         finally:
             state.active_calls.pop(call_id, None)
             if job.deployment_id is None:
-                job.deployment_id = state.deployment.name
+                job.deployment_id = state.deployment.id
 
     # -- jobs: submit, poll, resume, cancel -----------------------------
 
@@ -489,7 +489,7 @@ class Router:
     def _apply_metrics(self, metrics: dict[str, Any]) -> None:
         for pool, states in self.pools.items():
             for state in states:
-                entry = metrics.get(self._metrics_key(pool, state.deployment.name))
+                entry = metrics.get(self._metrics_key(pool, state.deployment.id))
                 if entry:
                     state.prefill_tokens_per_second = entry.get("prefill_tokens_per_second")
                     state.decode_tokens_per_second = entry.get("decode_tokens_per_second")
@@ -497,7 +497,7 @@ class Router:
 
     def _persist_metrics(self) -> None:
         store = {
-            self._metrics_key(pool, state.deployment.name): {
+            self._metrics_key(pool, state.deployment.id): {
                 "prefill_tokens_per_second": state.prefill_tokens_per_second,
                 "decode_tokens_per_second": state.decode_tokens_per_second,
                 "avg_completion_tokens": state.avg_completion_tokens,
