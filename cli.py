@@ -23,7 +23,10 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--metrics-path", default=DEFAULT_METRICS_PATH)
     serve.add_argument("--health-interval", type=int, default=DEFAULT_HEALTH_INTERVAL)
 
-    sub.add_parser("list", help="List configured pools and their health")
+    list_ = sub.add_parser("list", help="List configured pools and their health")
+    list_.add_argument("--config", default=DEFAULT_POOLS_CONFIG)
+    list_.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    list_.add_argument("--metrics-path", default=DEFAULT_METRICS_PATH)
 
     return parser
 
@@ -42,8 +45,16 @@ def _serve(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 def _list(args: argparse.Namespace) -> None:
-    print("Not yet implemented")
-    # TODO
+    import asyncio
+
+    from . import status
+    from .config import load_pools
+    from .router import Router
+
+    config = load_pools(args.config)
+    router = Router(config=config, metrics_path=args.metrics_path, log_dir=args.log_dir)
+    asyncio.run(status.check_health(router.pools))
+    print(status.render_text(router))
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()

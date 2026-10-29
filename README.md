@@ -57,7 +57,9 @@ llb serve --config pools.json
 | `--metrics-path` | `~/.store/metrics.json` — persisted throughput metrics, loaded on startup |
 | `--health-interval` | `60` — seconds between background health checks |
 
-`llb list` — list configured pools and their health (not yet implemented).
+`llb list` — print each pool's deployments with health, capacity, tok/s,
+queue depth, and current status (same data as `/status`, as a plain-text
+table). Takes `--config`, `--log-dir`, `--metrics-path`.
 
 ## HTTP API
 
