@@ -1,7 +1,7 @@
 [project]
-name = "switchboard"
+name = "llm-load-balancer"
 version = "0.1.0"
-description = "Standalone LLM pool-orchestration service: capacity-aware routing, schema validation with retry, health checks, and throughput benchmarking across model deployments."
+description = ""
 requires-python = ">=3.11"
 dependencies = [
     "litellm>=1.50",
@@ -9,17 +9,18 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "jsonschema>=4.20",
+    "mcp>=1.0",
 ]
 
 [project.scripts]
-switchboard = "switchboard.cli:main"
+llb = "llm_load_balancer.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["switchboard"]
+packages = ["llm_load_balancer"]
 
 [tool.setuptools.package-dir]
-switchboard = "."
+llm_load_balancer = "."

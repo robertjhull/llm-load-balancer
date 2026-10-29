@@ -56,7 +56,7 @@ def create_app(
             with contextlib.suppress(asyncio.CancelledError):
                 await health_task
 
-    app = FastAPI(title="Switchboard", lifespan=lifespan)
+    app = FastAPI(title="llm-load-balancer", lifespan=lifespan)
     app.state.router = router
 
     @app.post("/jobs")

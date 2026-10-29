@@ -1,1 +1,1 @@
-"""Switchboard: a standalone LLM pool-orchestration service."""
+"""llm-load-balancer: a standalone LLM pool-orchestration service."""

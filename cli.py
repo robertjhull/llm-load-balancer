@@ -7,15 +7,15 @@ from pathlib import Path
 DEFAULT_POOLS_CONFIG = "pools.json"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8800
-DEFAULT_LOG_DIR = str(Path.home() / ".switchboard" / "logs")
-DEFAULT_METRICS_PATH = str(Path.home() / ".switchboard" / "metrics.json")
+DEFAULT_LOG_DIR = str(Path.home() / ".store" / "logs")
+DEFAULT_METRICS_PATH = str(Path.home() / ".store" / "metrics.json")
 DEFAULT_HEALTH_INTERVAL = 60
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="switchboard")
+    parser = argparse.ArgumentParser(prog="llb")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="Run the switchboard HTTP server")
+    serve = sub.add_parser("serve", help="Run the HTTP server")
     serve.add_argument("--config", default=DEFAULT_POOLS_CONFIG)
     serve.add_argument("--host", default=DEFAULT_HOST)
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
