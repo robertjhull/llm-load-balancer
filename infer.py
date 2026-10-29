@@ -25,7 +25,9 @@ def infer(
     }
     if deployment.api_base:
         kwargs["api_base"] = deployment.api_base
-    if deployment.api_key:
+        kwargs["custom_llm_provider"] = "openai"
+        kwargs["api_key"] = deployment.api_key or "not-needed"
+    elif deployment.api_key:
         kwargs["api_key"] = deployment.api_key
     if response_format is not None:
         kwargs["response_format"] = {"type": "json_schema", "json_schema": response_format}
