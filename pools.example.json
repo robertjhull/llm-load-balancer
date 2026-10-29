@@ -1,19 +1,24 @@
 {
-  "_defaults": {
-    "max_retries": 2
-  },
-  "default": [
+  "default_pool": [
     {
-      "id": "local-llama",
+      "name": "local-llama",
       "model": "openai/local-model",
       "api_base": "http://127.0.0.1:8000/v1",
       "capacity": 1,
       "max_context_tokens": 8192
     },
     {
-      "id": "gpt-4o",
+      "name": "gpt-4o",
       "model": "openai/gpt-4o",
       "capacity": 4
+    },
+    {
+      "name": "local-thinking-model",
+      "model": "openai/local-reasoning-model",
+      "api_base": "http://127.0.0.1:8000/v1",
+      "capacity": 1,
+      "max_retries": 1,
+      "request_timeout": 240
     }
   ]
 }

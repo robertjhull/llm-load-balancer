@@ -1,40 +1,39 @@
-"""FastAPI app: /complete /health /pools /benchmark."""
 from __future__ import annotations
 
-import dataclasses
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from . import benchmark
+from . import status
 from .config import load_pools
-from .router import NoHealthyDeploymentError, Router
+from .router import Router
 
 
-class CompleteRequest(BaseModel):
-    pool: str
+class JobItemRequest(BaseModel):
     messages: list[dict[str, Any]]
     response_format: dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    max_tool_rounds: int | None = None
+    final_response_format: dict[str, Any] | None = None
+    final_prompt: str | None = None
     max_retries: int | None = None
     trace_id: str | None = None
+    pin_to_model_id: str | None = None
 
 
-class CompleteResponse(BaseModel):
-    success: bool
-    content: str | None = None
-    model_id: str | None = None
-    attempts: int
-    blocked_reason: str | None = None
-    latency_seconds: float
-
-
-class BenchmarkRequest(BaseModel):
+class SubmitRequest(BaseModel):
     pool: str
-    model_id: str | None = None
-    prompts: list[dict[str, Any]] | None = None
-    repeat: int = 1
+    items: list[JobItemRequest]
+
+
+class ResumeRequest(BaseModel):
+    tool_results: list[dict[str, Any]]
 
 
 def create_app(
@@ -44,60 +43,55 @@ def create_app(
     health_interval: int,
 ) -> FastAPI:
     config = load_pools(config_path)
-    router = Router(
-        config=config,
-        metrics_path=metrics_path,
-        log_dir=log_dir,
-        health_interval=health_interval,
-    )
+    router = Router(config=config, metrics_path=metrics_path, log_dir=log_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await router.start()
+        await status.check_health(router.pools)
+        health_task = asyncio.create_task(status.run_health_loop(router.pools, health_interval))
         try:
             yield
         finally:
-            await router.stop()
+            health_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await health_task
 
     app = FastAPI(title="Switchboard", lifespan=lifespan)
     app.state.router = router
 
-    @app.post("/complete", response_model=CompleteResponse)
-    async def complete(req: CompleteRequest) -> CompleteResponse:
-        if req.pool not in router.pools:
-            raise HTTPException(status_code=404, detail=f"unknown pool: {req.pool!r}")
+    @app.post("/jobs")
+    async def submit_jobs(req: SubmitRequest) -> dict:
         try:
-            result = await router.complete(
-                pool=req.pool,
-                messages=req.messages,
-                response_format=req.response_format,
-                max_retries=req.max_retries,
-                trace_id=req.trace_id,
-            )
-        except NoHealthyDeploymentError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return CompleteResponse(**dataclasses.asdict(result))
+            job_ids = router.submit(req.pool, [item.model_dump() for item in req.items])
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"job_ids": job_ids}
 
-    @app.get("/health")
-    async def health(pool: str | None = None) -> dict:
-        if pool is not None and pool not in router.pools:
-            raise HTTPException(status_code=404, detail=f"unknown pool: {pool!r}")
-        return await router.check_health(pool)
+    @app.get("/jobs/{job_id}")
+    async def job_status(job_id: str) -> dict:
+        described = router.describe(job_id)
+        if described is None:
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id!r}")
+        return described
 
-    @app.get("/pools")
-    async def pools_endpoint() -> dict:
-        return router.describe_pools()
+    @app.post("/jobs/{job_id}/resume")
+    async def job_resume(job_id: str, req: ResumeRequest) -> dict:
+        try:
+            router.resume(job_id, req.tool_results)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"resumed": True}
 
-    @app.post("/benchmark")
-    async def benchmark_endpoint(req: BenchmarkRequest) -> dict:
-        if req.pool not in router.pools:
-            raise HTTPException(status_code=404, detail=f"unknown pool: {req.pool!r}")
-        if req.prompts is None:
-            metrics = await benchmark.calibrate(router, req.pool, model_id=req.model_id)
-            return {"mode": "calibration", "metrics": metrics}
-        outputs = await benchmark.run_adhoc(
-            router, req.pool, req.prompts, repeat=req.repeat, model_id=req.model_id
-        )
-        return {"mode": "adhoc", "results": outputs}
+    @app.post("/jobs/{job_id}/cancel")
+    async def job_cancel(job_id: str) -> dict:
+        if not router.cancel(job_id):
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id!r}")
+        return {"cancelled": True}
+
+    @app.get("/status", response_class=HTMLResponse)
+    async def status_endpoint() -> str:
+        return status.render(router)
 
     return app
