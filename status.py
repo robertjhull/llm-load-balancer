@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 _STYLE = """
 body { font-family: Arial, sans-serif; background-color: #1e1e1e; color: #ddd; padding: 20px; }
-h2 { color: #eee; }
+h3 { color: #eee; }
 .pool { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; padding: 15px;
   margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -21,6 +21,32 @@ th { color: #999; }
 .healthy, .unhealthy { font-size: 1.2em; }
 .healthy { color: #3ddc84; }
 .unhealthy { color: #e05d5d; }
+.busy { animation: busy-pulse 1.6s ease-in-out infinite; }
+@keyframes busy-pulse {
+  0%, 100% { color: inherit; text-shadow: none; }
+  50% { color: #4da6ff; text-shadow: 0 0 8px #4da6ff; }
+}
+"""
+
+_POLL_SCRIPT = """
+<script>
+(function () {
+  const intervalMs = 2000;
+  async function refresh() {
+    try {
+      const res = await fetch(location.pathname, { cache: "no-store" });
+      const text = await res.text();
+      const next = new DOMParser().parseFromString(text, "text/html");
+      const current = document.getElementById("content");
+      const updated = next.getElementById("content");
+      if (current && updated) current.innerHTML = updated.innerHTML;
+    } catch (e) {
+      // ignore transient fetch failures; next tick will retry
+    }
+  }
+  setInterval(refresh, intervalMs);
+})();
+</script>
 """
 
 
@@ -80,8 +106,12 @@ def _pool_table(states: list["DeploymentState"]) -> str:
     header = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
 
     def row(state: "DeploymentState") -> str:
-        dot = f'<span class="{"healthy" if state.healthy else "unhealthy"}">●</span>'
-        status = "<br>".join(html.escape(e) for e in _active_entries(state)) or "idle"
+        active = _active_entries(state)
+        dot_class = "healthy" if state.healthy else "unhealthy"
+        if active:
+            dot_class += " busy"
+        dot = f'<span class="{dot_class}">●</span>'
+        status = "<br>".join(html.escape(e) for e in active) or "idle"
         cells = [dot, *(html.escape(value_fn(state)) for _, _, value_fn in _FIELDS), status]
         return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
 
@@ -91,14 +121,15 @@ def _pool_table(states: list["DeploymentState"]) -> str:
 
 def render(router: "Router") -> str:
     pools_html = "".join(
-        f'<div class="pool"><h2>{html.escape(pool)}</h2>{_pool_table(states)}</div>'
+        f'<div class="pool"><h3>{html.escape(pool)}</h3>{_pool_table(states)}</div>'
         for pool, states in router.pools.items()
     )
 
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
         f"<title>Status</title><style>{_STYLE}</style></head><body>"
-        f"{pools_html}"
+        f'<div id="content">{pools_html}</div>'
+        f"{_POLL_SCRIPT}"
         "</body></html>"
     )
 
