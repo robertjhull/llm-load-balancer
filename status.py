@@ -52,7 +52,7 @@ _POLL_SCRIPT = """
 
 # -- health ------------------------------------------------------------
 
-async def check_health(pools: dict[str, list["DeploymentState"]], pool: str | None = None) -> None:
+async def check_health(pools: dict[str, list[DeploymentState]], pool: str | None = None) -> None:
     targets = [
         state
         for name, states in pools.items()
@@ -63,11 +63,37 @@ async def check_health(pools: dict[str, list["DeploymentState"]], pool: str | No
     await asyncio.gather(*(state.is_healthy() for state in targets))
 
 
-async def run_health_loop(pools: dict[str, list["DeploymentState"]], interval: int) -> None:
+async def run_health_loop(pools: dict[str, list[DeploymentState]], interval: int) -> None:
     while True:
         await asyncio.sleep(interval)
         await check_health(pools)
 
+# -- json response ---------------------------------------------------------------
+
+def _deployment_json(state: DeploymentState) -> dict[str, Any]:
+    now = time.monotonic()
+    return {
+        "id": state.deployment.id or None,
+        "model": state.deployment.model or None,
+        "api_base": state.deployment.api_base or None,
+        "capacity": state.deployment.capacity,
+        "max_context_tokens": state.deployment.max_context_tokens,
+        "decode_tokens_per_second": state.decode_tokens_per_second,
+        "healthy": state.healthy,
+        "queued": sum(1 for a in state.active_calls.values() if a.state == "queued"),
+        "active": [
+            {"state": a.state, "elapsed_seconds": now - a.started_at}
+            for a in state.active_calls.values()
+            if a.state != "queued"
+        ],
+    }
+
+
+def available_pools(router: Router) -> dict[str, Any]:
+    return {
+        pool: [_deployment_json(state) for state in states]
+        for pool, states in router.pools.items()
+    }
 
 # -- html rendering -----------------------------------------------------------
 
@@ -75,11 +101,11 @@ def _rate(value: float | None, suffix: str) -> str:
     return f"{value:.1f}{suffix}" if value else "-"
 
 
-def _queued_cell(state: "DeploymentState") -> str:
+def _queued_cell(state: DeploymentState) -> str:
     return str(sum(1 for a in state.active_calls.values() if a.state == "queued"))
 
 
-def _active_entries(state: "DeploymentState") -> list[str]:
+def _active_entries(state: DeploymentState) -> list[str]:
     now = time.monotonic()
     return [
         f"{a.state} ({now - a.started_at:.1f}s)"
@@ -99,13 +125,13 @@ _FIELDS: list[tuple[str, str, Any]] = [
 ]
 
 
-def _pool_table(states: list["DeploymentState"]) -> str:
+def _pool_table(states: list[DeploymentState]) -> str:
     widths = ["3%", *(w for _, w, _ in _FIELDS), "12%"]
     headers = ["", *(name for name, _, _ in _FIELDS), "status"]
     colgroup = "".join(f'<col style="width: {w}">' for w in widths)
     header = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
 
-    def row(state: "DeploymentState") -> str:
+    def row(state: DeploymentState) -> str:
         active = _active_entries(state)
         dot_class = "healthy" if state.healthy else "unhealthy"
         if active:
@@ -119,7 +145,7 @@ def _pool_table(states: list["DeploymentState"]) -> str:
     return f"<table><colgroup>{colgroup}</colgroup><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table>"
 
 
-def render(router: "Router") -> str:
+def render(router: Router) -> str:
     pools_html = "".join(
         f'<div class="pool"><h4>{html.escape(pool)}</h4>{_pool_table(states)}</div>'
         for pool, states in router.pools.items()
@@ -136,10 +162,10 @@ def render(router: "Router") -> str:
 
 # -- terminal rendering ----------------------------------------------------
 
-def _pool_text_table(states: list["DeploymentState"]) -> str:
+def _pool_text_table(states: list[DeploymentState]) -> str:
     headers = ["up", *(name for name, _, _ in _FIELDS), "status"]
 
-    def row(state: "DeploymentState") -> list[str]:
+    def row(state: DeploymentState) -> list[str]:
         up = "yes" if state.healthy else "no"
         status = ", ".join(_active_entries(state)) or "idle"
         return [up, *(value_fn(state) for _, _, value_fn in _FIELDS), status]
@@ -158,7 +184,7 @@ def _pool_text_table(states: list["DeploymentState"]) -> str:
     return "\n".join(lines)
 
 
-def render_text(router: "Router") -> str:
+def render_text(router: Router) -> str:
     sections = [
         f"{pool}\n{_pool_text_table(states)}"
         for pool, states in router.pools.items()

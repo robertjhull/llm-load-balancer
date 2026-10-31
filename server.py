@@ -5,8 +5,8 @@ import contextlib
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from . import status
@@ -90,8 +90,12 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id!r}")
         return {"cancelled": True}
 
-    @app.get("/status", response_class=HTMLResponse)
-    async def status_endpoint() -> str:
-        return status.render(router)
+    @app.get("/status")
+    async def status_endpoint() -> HTMLResponse:
+        return HTMLResponse(status.render(router))
+
+    @app.get("/available")
+    async def json_endpoint() -> JSONResponse:
+        return JSONResponse(status.available_pools(router))
 
     return app
