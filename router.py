@@ -35,16 +35,24 @@ class SchemaValidationError(Exception):
     """Raised for either malformed JSON or schema-mismatched JSON."""
 
 
+def _preview(raw_text: str) -> str:
+    if len(raw_text) <= 500:
+        return raw_text
+    return raw_text[:500] + "... (truncated)"
+
+
 def validate(raw_text: str, schema: dict) -> dict:
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError as exc:
-        raise SchemaValidationError(f"invalid JSON: {exc}") from exc
+        raise SchemaValidationError(f"invalid JSON: {exc}; llm output: {_preview(raw_text)!r}") from exc
 
     try:
         jsonschema.validate(data, schema)
     except jsonschema.ValidationError as exc:
-        raise SchemaValidationError(f"schema validation failed: {exc.message}") from exc
+        raise SchemaValidationError(
+            f"schema validation failed: {exc.message}; llm output: {_preview(raw_text)!r}"
+        ) from exc
 
     return data
 
@@ -126,9 +134,19 @@ class Router:
 
     # -- routing -----------------------------------------------------
 
-    def _select(self, pool: str, prompt_tokens: int) -> DeploymentState:
-        candidates = [s for s in self.pools[pool] if s.healthy]
+    def _select(self, pool: str, prompt_tokens: int) -> tuple[DeploymentState, float]:
+        healthy = [s for s in self.pools[pool] if s.healthy]
+        candidates = [
+            s
+            for s in healthy
+            if not s.deployment.max_context_tokens or prompt_tokens <= s.deployment.max_context_tokens
+        ]
         if not candidates:
+            if healthy:
+                raise NoHealthyDeploymentError(
+                    f"no deployment in pool {pool!r} has max_context_tokens >= "
+                    f"{prompt_tokens} estimated prompt tokens"
+                )
             raise NoHealthyDeploymentError(f"no healthy deployment in pool {pool!r}")
 
         best = min(candidates, key=lambda s: s.lanes[0])
@@ -137,14 +155,23 @@ class Router:
         now = time.monotonic()
         free_at = heapq.heappop(best.lanes)
         start = max(now, free_at)
-        heapq.heappush(best.lanes, start + duration)
-        return best
+        committed_free_at = start + duration
+        heapq.heappush(best.lanes, committed_free_at)
+        return best, committed_free_at
 
     def _get_state(self, pool: str, deployment_id: str) -> DeploymentState:
         for state in self.pools[pool]:
             if state.deployment.id == deployment_id:
                 return state
         raise KeyError(f"no deployment {deployment_id!r} in pool {pool!r}")
+
+    def _reconcile_lane(self, state: DeploymentState, committed_free_at: float) -> None:
+        try:
+            state.lanes.remove(committed_free_at)
+        except ValueError:
+            return
+        heapq.heapify(state.lanes)
+        heapq.heappush(state.lanes, time.monotonic())
 
     # -- the call path -------------------------------------------------
 
@@ -189,11 +216,11 @@ class Router:
         tool_choice: Any,
     ) -> CompleteResult:
         prompt_tokens = estimate_tokens(messages)
-        state = (
-            self._get_state(job.pool, job.deployment_id)
-            if job.deployment_id is not None
-            else self._select(job.pool, prompt_tokens)
-        )
+        committed_free_at: float | None = None
+        if job.deployment_id is not None:
+            state = self._get_state(job.pool, job.deployment_id)
+        else:
+            state, committed_free_at = self._select(job.pool, prompt_tokens)
         retries = state.get_max_retries(job.max_retries)
         request_timeout = state.get_timeout()
 
@@ -307,6 +334,8 @@ class Router:
             state.active_calls.pop(call_id, None)
             if job.deployment_id is None:
                 job.deployment_id = state.deployment.id
+            if committed_free_at is not None:
+                self._reconcile_lane(state, committed_free_at)
 
     # -- jobs: submit, poll, resume, cancel -----------------------------
 
