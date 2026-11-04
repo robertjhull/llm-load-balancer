@@ -47,8 +47,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await status.check_health(router.pools)
-        health_task = asyncio.create_task(status.run_health_loop(router.pools, health_interval))
+        await router.check_health()
+        health_task = asyncio.create_task(router.run_health_loop(health_interval))
         try:
             yield
         finally:

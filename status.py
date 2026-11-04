@@ -80,18 +80,19 @@ def _deployment_json(state: DeploymentState) -> dict[str, Any]:
         "max_context_tokens": state.deployment.max_context_tokens,
         "decode_tokens_per_second": state.decode_tokens_per_second,
         "healthy": state.healthy,
-        "queued": sum(1 for a in state.active_calls.values() if a.state == "queued"),
         "active": [
             {"state": a.state, "elapsed_seconds": now - a.started_at}
             for a in state.active_calls.values()
-            if a.state != "queued"
         ],
     }
 
 
 def available_pools(router: Router) -> dict[str, Any]:
     return {
-        pool: [_deployment_json(state) for state in states]
+        pool: {
+            "queued": router.queue_depth(pool),
+            "deployments": [_deployment_json(state) for state in states],
+        }
         for pool, states in router.pools.items()
     }
 
@@ -101,17 +102,9 @@ def _rate(value: float | None, suffix: str) -> str:
     return f"{value:.1f}{suffix}" if value else "-"
 
 
-def _queued_cell(state: DeploymentState) -> str:
-    return str(sum(1 for a in state.active_calls.values() if a.state == "queued"))
-
-
 def _active_entries(state: DeploymentState) -> list[str]:
     now = time.monotonic()
-    return [
-        f"{a.state} ({now - a.started_at:.1f}s)"
-        for a in state.active_calls.values()
-        if a.state != "queued"
-    ]
+    return [f"{a.state} ({now - a.started_at:.1f}s)" for a in state.active_calls.values()]
 
 
 _FIELDS: list[tuple[str, str, Any]] = [
@@ -121,7 +114,6 @@ _FIELDS: list[tuple[str, str, Any]] = [
     ("capacity", "6%", lambda s: str(s.deployment.capacity)),
     ("max_context", "9%", lambda s: str(s.deployment.max_context_tokens or "-")),
     ("tok/s", "6%", lambda s: _rate(s.decode_tokens_per_second, "")),
-    ("queued", "9%", _queued_cell),
 ]
 
 
@@ -147,7 +139,8 @@ def _pool_table(states: list[DeploymentState]) -> str:
 
 def render(router: Router) -> str:
     pools_html = "".join(
-        f'<div class="pool"><h4>{html.escape(pool)}</h4>{_pool_table(states)}</div>'
+        f'<div class="pool"><h4>{html.escape(pool)} '
+        f'&mdash; {router.queue_depth(pool)} queued</h4>{_pool_table(states)}</div>'
         for pool, states in router.pools.items()
     )
 
@@ -186,7 +179,7 @@ def _pool_text_table(states: list[DeploymentState]) -> str:
 
 def render_text(router: Router) -> str:
     sections = [
-        f"{pool}\n{_pool_text_table(states)}"
+        f"{pool} ({router.queue_depth(pool)} queued)\n{_pool_text_table(states)}"
         for pool, states in router.pools.items()
     ]
     return "\n\n".join(sections)

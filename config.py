@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import heapq
 import json
 import time
 import urllib.error
@@ -37,7 +36,7 @@ class PoolsConfig:
 @dataclass
 class CallActivity:
     label: dict[str, Any] | None = None
-    state: str = "queued"  # queued | inferring | streaming | complete
+    state: str = "inferring"  # inferring | streaming | complete
     started_at: float = field(default_factory=time.monotonic)
     first_token_at: float | None = None
     tokens_emitted: int = 0
@@ -47,9 +46,6 @@ class CallActivity:
 class DeploymentState:
     def __init__(self, deployment: Deployment):
         self.deployment = deployment
-        self.lanes: list[float] = [0.0] * max(1, deployment.capacity)
-        heapq.heapify(self.lanes)
-        self.semaphore = asyncio.Semaphore(max(1, deployment.capacity))
         self.healthy = False
         self.prefill_tokens_per_second: float | None = None
         self.decode_tokens_per_second: float | None = None
@@ -73,6 +69,28 @@ class DeploymentState:
                 + self.avg_completion_tokens / self.decode_tokens_per_second
             )
         return DEFAULT_DURATION_SECONDS
+
+    def free_slots(self) -> int:
+        return max(0, self.deployment.capacity - len(self.active_calls))
+
+    def fits_context(self, prompt_tokens: int) -> bool:
+        mct = self.deployment.max_context_tokens
+        return not mct or prompt_tokens <= mct
+
+    def soonest_remaining(self) -> float | None:
+        # Smallest known time-left among in-flight calls -- the earliest a slot
+        # could open. None if no in-flight call has enough live progress to
+        # estimate against (e.g. still in prefill).
+        knowns = [r for a in self.active_calls.values() if (r := self._remaining(a)) is not None]
+        return min(knowns) if knowns else None
+
+    def _remaining(self, activity: CallActivity) -> float | None:
+        if activity.first_token_at is None:
+            return None
+        if not self.decode_tokens_per_second or not self.avg_completion_tokens:
+            return None
+        remaining_tokens = max(0.0, self.avg_completion_tokens - activity.tokens_emitted)
+        return remaining_tokens / self.decode_tokens_per_second
 
     async def is_healthy(self) -> bool:
         if not self.deployment.api_base:
